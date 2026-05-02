@@ -8,11 +8,11 @@ from . import buffers, helpers
 
 # =============================================================================
 # Buffer equations using no nested lists
-def buffer_equations(variables, C_Na, C_Cl, C_tot_list, Ka_all, zA_all, lengths, num_equations):
+def buffer_equations(variables, Kw, C_Na, C_Cl, C_tot_list, Ka_all, zA_all, lengths, num_equations):
     eqs = np.zeros(num_equations)
 
     C_H = variables[0]
-    C_OH = 1e-8 / C_H
+    C_OH = Kw / C_H
 
     # Electroneutrality equation
     offset = 0
@@ -69,7 +69,10 @@ def unpack_array(array, lengths):
     return result
 
 
-def solve_acid_base_multi(C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list):
+def solve_acid_base_multi(Kw, C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list):
+    # Convert from M^2 to mM^2 for Kw
+    Kw = Kw * 1e6
+
     # Convert from M to mM for Ka values
     Ka_list_list = [np.array(Ka) * 1e3 for Ka in Ka_list_list]
 
@@ -85,7 +88,7 @@ def solve_acid_base_multi(C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list):
     lengths = np.array([len(l) for l in zA_list_list]) # number of species for each buffer
 
     def wrapped_equations(x):
-        return buffer_equations(x, C_Na, C_Cl, C_tot_list, Ka_all, zA_all, lengths, num_equations)
+        return buffer_equations(x, Kw, C_Na, C_Cl, C_tot_list, Ka_all, zA_all, lengths, num_equations)
 
     # Initial guesses for C_H and concentrations of acids
     highest_C_tot_index = np.argmax(C_tot_list)
@@ -107,7 +110,6 @@ def solve_acid_base_multi(C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list):
     for guess in H_guesses:
         initial_guess = np.concatenate([[guess], C_a_guess])
         sol = least_squares(wrapped_equations, initial_guess, bounds=bounds)
-        # sol = root(buffer_equations, initial_guess, method='hybr') # Faster but doesn't always work
         if is_valid_solution(sol):
             break
         else:
@@ -118,7 +120,7 @@ def solve_acid_base_multi(C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list):
     # Extract concentrations
     C_H = sol.x[0]
     C_a_list = unpack_array(sol.x[1:], lengths)
-    C_OH = 1e-8 / C_H  # Kw = 1e-8 mmol^2/L^2
+    C_OH = Kw / C_H
 
     return C_H, C_OH, C_Na, C_Cl, C_a_list
 
@@ -130,11 +132,13 @@ def equilibrate(C_Na, C_Cl, C_tot_list, pKa_list_list, zA_list_list, A, b):
     difference = 1e2  # Start with a large difference to enter the loop
 
     # Initialize values for the loop
-    C_H, C_OH, C_Na, C_Cl, C_a_list = solve_acid_base_multi(C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list)
+    Kw = 1e-14
+    C_H, C_OH, C_Na, C_Cl, C_a_list = solve_acid_base_multi(Kw, C_Na, C_Cl, C_tot_list, Ka_list_list, zA_list_list)
     species = [C_H, C_OH, C_Na, C_Cl, C_a_list]
     ionic_strength = helpers.calculate_ionic_strength(C_H, C_OH, C_Na, C_Cl, C_a_list, zA_list_list)
 
     # Precompute corrected pKa based on initial ionic strength
+    Kw_corrected = helpers.corrected_Kw(ionic_strength)
     pKa_corrected_list = helpers.corrected_pKa(ionic_strength, A, b, zA_list_list, pKa_list_list)
     Ka_corrected_list = helpers.pK_to_K(pKa_corrected_list)
 
@@ -143,11 +147,12 @@ def equilibrate(C_Na, C_Cl, C_tot_list, pKa_list_list, zA_list_list, A, b):
     # Iterative loop to converge the pKa correction
     while difference > tolerance:
         # Solve the acid-base system with the corrected Ka values
-        C_H, C_OH, C_Na, C_Cl, C_a_list = solve_acid_base_multi(C_Na, C_Cl, C_tot_list, Ka_corrected_list, zA_list_list)
+        C_H, C_OH, C_Na, C_Cl, C_a_list = solve_acid_base_multi(Kw_corrected, C_Na, C_Cl, C_tot_list, Ka_corrected_list, zA_list_list)
         species = [C_H, C_OH, C_Na, C_Cl, C_a_list]
         ionic_strength = helpers.calculate_ionic_strength(C_H, C_OH, C_Na, C_Cl, C_a_list, zA_list_list)
 
         # Get corrected pKa values based on the updated ionic strength
+        Kw_corrected = helpers.corrected_Kw(ionic_strength)
         pKa_corrected_list = helpers.corrected_pKa(ionic_strength, A, b, zA_list_list, pKa_list_list)
         Ka_corrected_list = helpers.pK_to_K(pKa_corrected_list)
 

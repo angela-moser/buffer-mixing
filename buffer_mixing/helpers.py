@@ -32,6 +32,21 @@ def calculate_activity_coeff(IS, A=0.5114, b=0.1, z=1):
     return g
 
 
+def corrected_Kw(IS_mM):
+    IS = IS_mM * 1e-3  # mM -> M
+
+    A = 0.5114  # at ~25 C
+    b = 0.1
+
+    # Davies equation for monovalent ions
+    log10_gamma = -A * math.sqrt(IS) / (1 + math.sqrt(IS)) - b * IS
+
+    pKw_cor = 14.0 + 2 * log10_gamma
+    Kw_cor = 10 ** (-pKw_cor)
+
+    return Kw_cor
+
+
 def corrected_pKa(IS, A, b, zA, pKa):
     IS = IS * 1e-3  # change to molar units from mM
 
