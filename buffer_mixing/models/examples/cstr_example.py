@@ -11,9 +11,12 @@ import os, sys
 import numpy as np
 from pathlib import Path
 
-root = Path(__file__).resolve().parents[2]
-if str(root) not in sys.path:
-    sys.path.insert(0, str(root))
+current = Path(__file__).resolve()
+
+for parent in current.parents:
+    if (parent / "buffer_mixing").exists():
+        sys.path.insert(0, str(parent))
+        break
 
 from buffer_mixing import buffers, helpers, cstr
 
